@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>vLLM과 llm-d 쉽게 보기</title>
+<meta name="description" content="vLLM은 GPU 한 대를 꽉 채워 쓰는 엔진, llm-d는 그 엔진 여러 대를 쿠버네티스 위에서 배차하는 본부다. 벨로키 식당 비유로 PagedAttention·연속 배칭·KV 캐시 인식 라우팅·프리필/디코드 분리를 설명한다.">
+<style>
+:root{--bg:#fbf7f0;--panel:#fff;--panel2:#f3ece0;--ink:#26221d;--muted:#6e665b;--line:#e2d8c8;--accent:#e2632b;--blue:#2f6fd6;--mint:#1f9e7a;--yellow:#f2b632;--red:#d6453d;--shadow:0 2px 0 #e2d8c8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#17140f;--panel:#211d17;--panel2:#2a251d;--ink:#f4ede2;--muted:#b7ab99;--line:#3d362b;--accent:#ff8a4c;--blue:#7fb0ff;--mint:#5ad6ad;--yellow:#ffd06a;--red:#ff7a70;--shadow:0 2px 0 #3d362b}}
+:root[data-theme="dark"]{--bg:#17140f;--panel:#211d17;--panel2:#2a251d;--ink:#f4ede2;--muted:#b7ab99;--line:#3d362b;--accent:#ff8a4c;--blue:#7fb0ff;--mint:#5ad6ad;--yellow:#ffd06a;--red:#ff7a70;--shadow:0 2px 0 #3d362b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.8 system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--blue)}
+.wrap{max-width:860px;margin:0 auto;padding:28px 16px 80px}
+header.hero{padding:28px 0 8px}
+.kicker{font-size:13px;letter-spacing:.08em;color:var(--accent);font-weight:700}
+h1{font-size:clamp(28px,6vw,42px);line-height:1.25;margin:8px 0 14px}
+h2{font-size:clamp(22px,4.6vw,28px);line-height:1.35;margin:56px 0 12px;padding-top:12px;border-top:2px dashed var(--line)}
+h3{font-size:19px;margin:28px 0 8px}
+.lead{font-size:18px;color:var(--ink)}
+.meta{font-size:13px;color:var(--muted)}
+.card{background:var(--panel);border:1.5px solid var(--line);border-radius:16px;padding:18px 18px;margin:18px 0;box-shadow:var(--shadow)}
+.answer{border-left:6px solid var(--accent)}
+.toc{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0;padding:0;list-style:none}
+.toc a{display:inline-block;font-size:14px;padding:5px 12px;border:1.5px solid var(--line);border-radius:999px;text-decoration:none;color:var(--ink);background:var(--panel)}
+.bubble{display:flex;gap:12px;align-items:flex-start;margin:20px 0}
+.bubble img{width:72px;height:auto;flex:none;background:#fff;border-radius:14px;border:1.5px solid var(--line);padding:4px}
+.bubble.flip{flex-direction:row-reverse}
+.bubble.flip img{transform:scaleX(-1)}
+.bubble .say{background:var(--panel2);border:1.5px solid var(--line);border-radius:16px;padding:12px 16px;position:relative}
+.bubble .who{font-size:12px;font-weight:700;color:var(--accent);display:block}
+figure{margin:22px 0}
+figure.illustration img{display:block;width:100%;height:auto;border:1.5px solid var(--line);border-radius:16px}
+figure svg{width:100%;height:auto;display:block;background:var(--panel);border:1.5px solid var(--line);border-radius:16px}
+figcaption{font-size:14px;color:var(--muted);margin-top:6px}
+.tbl{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:16px 0}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:15px;background:var(--panel)}
+th,td{border:1px solid var(--line);padding:9px 10px;vertical-align:top;text-align:left}
+th{background:var(--panel2)}
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:1px 8px;border-radius:999px;border:1.5px solid currentColor;margin-right:4px}
+.t-v{color:var(--blue)}.t-d{color:var(--mint)}.t-o{color:var(--accent)}
+.note{font-size:14px;color:var(--muted)}
+.sim{background:var(--panel);border:1.5px solid var(--line);border-radius:16px;padding:16px;margin:18px 0}
+.sim .btns{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.sim button{font:inherit;font-size:15px;padding:8px 14px;border-radius:10px;border:1.5px solid var(--line);background:var(--panel2);color:var(--ink);cursor:pointer}
+.sim button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent);color:#fff}
+.kitchens{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.k{border:1.5px solid var(--line);border-radius:12px;padding:10px;min-height:120px;background:var(--panel2)}
+.k b{font-size:14px}
+.k .prep{font-size:13px;color:var(--muted)}
+.chip{display:inline-block;font-size:13px;margin:3px 3px 0 0;padding:2px 8px;border-radius:8px;background:var(--panel);border:1.5px solid var(--line)}
+.chip.hit{border-color:var(--mint);color:var(--mint);font-weight:700}
+.chip.miss{border-color:var(--red);color:var(--red);font-weight:700}
+.score{margin-top:12px;font-weight:700}
+.check li{margin:6px 0}
+.src li{font-size:14px;margin:4px 0}
+footer{margin-top:60px;font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:16px}
+@media (max-width:560px){.kitchens{grid-template-columns:1fr}.bubble img{width:56px}body{font-size:16px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">TECHTAEK · 벨로키의 AI 주방 견학</div>
+  <h1>vLLM과 llm-d, 같은 말 같은데 뭐가 다를까?</h1>
+  <p class="lead">vLLM은 <b>GPU 한 대(또는 한 묶음)를 꽉 채워 굴리는 추론 엔진</b>이고, llm-d는 <b>그 엔진 여러 대를 쿠버네티스 위에서 묶어 요청을 똑똑하게 나눠 주는 배차 본부</b>입니다. 작은 서비스라면 vLLM부터 시작하고, 서버가 여러 대이고 반복되는 긴 요청이 많다면 llm-d를 검토해 볼 만합니다.</p>
+  <p class="meta">2026-11-04 작성 · 기준 버전: vLLM 0.33.0(PyPI 2026-11-02), llm-d v1.0(2026-10-20 발표) · 오늘 비유 세계: 식당 하나만 씁니다.</p>
+  <ul class="toc">
+    <li><a href="#s1">1. 주방에서 일어나는 일</a></li>
+    <li><a href="#s2">2. vLLM: 주방 하나를 꽉</a></li>
+    <li><a href="#s3">3. 주방이 여러 개가 되면</a></li>
+    <li><a href="#s4">4. llm-d: 배차 본부</a></li>
+    <li><a href="#sim">5. 배차 비교 데모</a></li>
+    <li><a href="#s6">6. 나는 뭘 쓰나</a></li>
+    <li><a href="#s7">7. 숫자는 어디까지 믿나</a></li>
+  </ul>
+</header>
+
+<figure class="illustration">
+  <img src="assets/veloki-ai-kitchen.webp" alt="앞치마를 입은 벨로키가 손질된 재료와 여러 주방을 살펴보는 모습">
+  <figcaption>벨로키의 AI 식당: 한 주방을 잘 돌리는 일과 여러 주방에 주문을 나누는 일은 서로 다릅니다.</figcaption>
+</figure>
+
+<div class="bubble">
+  <img src="assets/veloki-a.webp" alt="안내자 벨로키(흰 벨로키랍토르, 점눈)">
+  <div class="say"><span class="who">벨로키</span>오늘은 AI 식당 견학이야. 손님이 질문을 주문하면, 주방이 답을 한 숟가락씩 만들어서 내보내. 그 주방 이야기가 vLLM, 지점 여러 개를 굴리는 본부 이야기가 llm-d야.</div>
+</div>
+
+<div class="card answer"><b>먼저 딱 한 가지만 기억하세요.</b><br>vLLM은 AI가 답을 만들도록 일하는 <b>주방</b>, llm-d는 여러 주방 중 주문을 어디로 보낼지 돕는 <b>배차 본부</b>입니다. 둘은 경쟁자가 아니라 함께 쓸 수 있는 도구입니다.</div>
+
+<h2 id="s1">1. 주방에서 일어나는 일: 손질하고, 한 숟가락씩</h2>
+<p>LLM이 답을 만드는 과정은 크게 두 단계입니다. 먼저 손님의 주문서(프롬프트)를 한 번에 쭉 읽고 재료를 손질하는 <b>프리필(prefill)</b>, 그다음 답을 토큰 하나씩 이어 붙이는 <b>디코드(decode)</b>입니다. 프리필은 계산이 몰리는 일이고, 디코드는 한 번에 조금씩이지만 오래 걸리는 일이라 성격이 꽤 다릅니다.</p>
+<p>예를 들어 사내 챗봇에 “이 휴가 규정에서 연차 신청 방법을 알려줘”라고 물어본다고 해 볼게요. 챗봇은 먼저 규정과 질문을 읽고(프리필), 이어서 답을 조금씩 만들어 보여줍니다(디코드). 화면에 글자가 차례로 나타나는 모습을 떠올리면 됩니다. 토큰은 모델이 글을 처리하는 작은 조각으로, 꼭 한 글자나 한 단어와 같지는 않습니다.</p>
+<p>손질해 둔 재료가 바로 <b>KV 캐시</b>입니다. 앞에서 읽은 문장의 계산 결과를 GPU 메모리(작업대)에 올려 두고, 다음 토큰을 만들 때마다 다시 꺼내 씁니다. 그래서 대화가 길어질수록 작업대 위 재료가 늘어나고, 작업대 자리가 모자라면 손님을 덜 받게 됩니다.</p>
+
+<figure>
+<svg viewBox="0 0 760 300" role="img" aria-label="프리필은 주문서를 한 번에 읽고 재료를 손질하는 단계, 디코드는 한 숟가락씩 담는 단계. 손질된 재료가 KV 캐시로 작업대에 쌓인다.">
+  <rect x="20" y="40" width="220" height="200" rx="14" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="2"/>
+  <text x="130" y="72" text-anchor="middle" font-size="18" font-weight="700" fill="#e2632b">① 프리필</text>
+  <text x="130" y="100" text-anchor="middle" font-size="14" fill="currentColor">주문서(프롬프트) 전체를</text>
+  <text x="130" y="120" text-anchor="middle" font-size="14" fill="currentColor">한 번에 읽고 재료 손질</text>
+  <rect x="55" y="140" width="150" height="70" rx="8" fill="#e2632b" fill-opacity=".12" stroke="#e2632b"/>
+  <text x="130" y="170" text-anchor="middle" font-size="13" fill="currentColor">계산 많음</text>
+  <text x="130" y="190" text-anchor="middle" font-size="13" fill="currentColor">(GPU 연산이 바쁨)</text>
+  <path d="M245 140 L300 140" stroke="currentColor" stroke-width="2" marker-end="url(#ar)"/>
+  <rect x="305" y="40" width="200" height="200" rx="14" fill="#1f9e7a" fill-opacity=".08" stroke="#1f9e7a" stroke-width="2"/>
+  <text x="405" y="72" text-anchor="middle" font-size="18" font-weight="700" fill="#1f9e7a">KV 캐시</text>
+  <text x="405" y="98" text-anchor="middle" font-size="14" fill="currentColor">= 작업대 위 손질된 재료</text>
+  <g fill="#1f9e7a" fill-opacity=".55">
+    <rect x="330" y="118" width="40" height="26" rx="5"/><rect x="375" y="118" width="40" height="26" rx="5"/><rect x="420" y="118" width="40" height="26" rx="5"/>
+    <rect x="330" y="150" width="40" height="26" rx="5"/><rect x="375" y="150" width="40" height="26" rx="5"/>
+  </g>
+  <text x="405" y="210" text-anchor="middle" font-size="13" fill="currentColor">대화가 길수록 쌓인다</text>
+  <path d="M510 140 L565 140" stroke="currentColor" stroke-width="2" marker-end="url(#ar)"/>
+  <rect x="570" y="40" width="170" height="200" rx="14" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="2"/>
+  <text x="655" y="72" text-anchor="middle" font-size="18" font-weight="700" fill="#2f6fd6">② 디코드</text>
+  <text x="655" y="100" text-anchor="middle" font-size="14" fill="currentColor">답을 토큰 하나씩</text>
+  <text x="655" y="120" text-anchor="middle" font-size="14" fill="currentColor">한 숟가락씩 담기</text>
+  <text x="655" y="170" text-anchor="middle" font-size="22" fill="#2f6fd6">● ● ● ○ ○</text>
+  <text x="655" y="205" text-anchor="middle" font-size="13" fill="currentColor">메모리 읽기가 바쁨</text>
+  <image href="assets/veloki-a.webp" x="672" y="232" width="62" height="62"/>
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="currentColor"/></marker></defs>
+</svg>
+<figcaption>그림 1. 추론의 두 단계. 프리필과 디코드는 바쁜 자원이 다르다는 점이 나중에 llm-d의 "분리" 아이디어로 이어집니다.</figcaption>
+</figure>
+
+<div class="bubble flip">
+  <img src="assets/veloki-a.webp" alt="고개를 반대로 돌린 벨로키">
+  <div class="say"><span class="who">벨로키</span>요리 자체(모델)는 같아도, 작업대를 어떻게 쓰고 손님을 어떻게 받느냐에 따라 한 시간에 내보내는 접시 수가 달라질 수 있어. 그걸 다루는 게 추론 서빙이야.</div>
+</div>
+
+<figure class="illustration">
+  <img src="assets/261104-veloki-prefill.webp" alt="벨로키가 긴 주문서를 보고 재료를 손질하며 접시를 준비한다" loading="lazy">
+  <figcaption>주문서를 읽고 재료를 준비하는 프리필, 준비된 재료를 활용해 답을 내놓는 디코드.</figcaption>
+</figure>
+
+<h2 id="s2">2. vLLM: 주방 하나를 꽉 채워 쓰는 주방 운영법</h2>
+<p>vLLM은 오픈소스 LLM 추론 엔진입니다. 모델 파일을 올리면 OpenAI 호환 API로 답을 내주는 서버가 되고, 핵심은 <b>같은 GPU로 더 많은 손님을 받는 기술</b>입니다. 업계어 세 개만 사람말로 바꿔 보겠습니다.</p>
+
+<h3>PagedAttention → 작업대를 작은 칸으로 나눠 쓰기</h3>
+<p>일부 기존 방식은 답이 얼마나 길어질지 몰라 손님마다 넉넉한 공간을 미리 잡아 둡니다. 짧게 끝나는 손님이 많으면 남는 공간이 생기죠. vLLM은 작업대를 작은 칸(블록)으로 나누고 재료가 늘 때마다 칸을 하나씩 빌려 줍니다. 운영체제가 메모리를 페이지 단위로 나눠 쓰는 방식을 빌려 와서 이름이 PagedAttention입니다.</p>
+
+<h3>연속 배칭 → 한 테이블 끝나면 바로 다음 손님</h3>
+<p>단순한 배칭은 "이번 묶음 손님이 전부 다 먹을 때까지" 새 손님을 안 받습니다. 한 명이 코스 요리를 시키면 나머지 자리는 비어 있는 셈입니다. vLLM은 토큰 한 걸음마다 끝난 손님을 빼고 대기 손님을 끼워 넣습니다. 주방이 쉬는 틈이 줄어드니 처리량이 오릅니다.</p>
+
+<h3>프리픽스 캐싱 → 같은 밑국물은 다시 안 끓이기</h3>
+<p>프리픽스 캐싱이 활성화되어 있고 캐시가 남아 있다면, 여러 요청이 같은 시스템 프롬프트나 같은 문서로 시작할 때 공통 앞부분의 계산 결과를 재사용할 수 있습니다. 사내 챗봇처럼 앞머리가 똑같은 요청이 많을수록 효과가 큽니다. 이 "같은 밑국물" 개념이 3장부터 아주 중요해집니다.</p>
+
+<div class="card">
+  <b>정리:</b> vLLM은 <span class="tag t-v">엔진</span> 한 주방 안에서 작업대(GPU 메모리)와 조리 순서(스케줄링)를 최적화합니다. 텐서 병렬 등으로 GPU 여러 장을 한 주방처럼 묶을 수도 있지만, "여러 주방에 손님을 어떻게 나눌지"는 vLLM의 본업이 아닙니다.
+</div>
+
+<h2 id="s3">3. 주방이 여러 개가 되면 생기는 문제</h2>
+<p>손님이 늘면 vLLM 서버(주방)를 여러 대 띄우고 앞에 로드밸런서를 둡니다. 쿠버네티스라면 Service를 통해 여러 서버에 요청을 분산할 수 있죠. 실제 분산 방식은 환경과 연결 방식에 따라 다릅니다. 여기서 문제가 생깁니다. 로드밸런서는 <b>어느 주방에 어떤 재료가 손질돼 있는지 모릅니다.</b></p>
+<p>예를 들어 직원들이 같은 휴가 규정으로 “연차는 어떻게 신청해요?”와 “반차는 몇 시간인가요?”를 묻습니다. 두 질문이 규정 전문을 같은 앞부분으로 포함한다면, 그 부분의 계산을 재사용할 기회가 생깁니다. 하지만 첫 질문을 받은 A 주방 대신 B 주방으로 다음 질문이 가고 B에 해당 캐시가 없다면, B는 그 부분을 다시 계산해야 합니다.</p>
+<p>같은 손님의 두 번째 질문이 다른 지점으로 가고 해당 캐시도 없다면, 그 지점은 공통 앞부분을 다시 손질해야 합니다. 같은 문서로 시작하는 요청 열 개가 열 군데로 흩어지면 같은 밑국물을 열 번 끓입니다. AI 에이전트처럼 대화가 길고 여러 번 왔다 갔다 하는 사용 패턴일수록 이 낭비가 커집니다.</p>
+
+<div class="bubble">
+  <img src="assets/veloki-a.webp" alt="벨로키">
+  <div class="say"><span class="who">벨로키</span>배달 앱이 "가까운 지점" 대신 "줄 짧은 지점"으로만 보내는데, 정작 내 주문 재료는 옆 지점 냉장고에 손질돼 있는 상황. 지점은 열심히 일하는데 같은 양파를 세 번 썰고 있어.</div>
+</div>
+
+<h2 id="s4">4. llm-d: 지점을 묶는 배차 본부</h2>
+<p>llm-d는 2025년 5월 Red Hat·Google·IBM 엔지니어들이 공개한 <b>쿠버네티스 기반 분산 LLM 추론 프레임워크</b>입니다. 2026년 10월 20일 v1.0을 냈고, CNCF 샌드박스 프로젝트이며 v1.0 글 기준 25개 넘는 조직의 500명 넘는 기여자가 참여했다고 밝힙니다. 직접 모델을 계산하지 않고, vLLM(최근엔 SGLang도) 같은 엔진을 주방으로 두고 그 위에서 배차를 맡습니다.</p>
+<p>입구는 쿠버네티스 공식 프로젝트인 <b>Gateway API Inference Extension(추론 게이트웨이)</b>입니다. llm-d의 스케줄러는 여기에 꽂히는 "엔드포인트 피커"로 동작해서, 요청마다 어느 vLLM 파드로 보낼지 고릅니다.</p>
+
+<figure>
+<svg viewBox="0 0 760 380" role="img" aria-label="손님 요청이 추론 게이트웨이로 들어오고 llm-d 배차 본부가 KV 캐시 상태를 보고 vLLM 주방을 고른다. 프리필 전담 주방과 디코드 전담 주방이 분리되어 재료를 전달한다.">
+  <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="currentColor"/></marker></defs>
+  <rect x="20" y="150" width="110" height="70" rx="12" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-width="2"/>
+  <text x="75" y="182" text-anchor="middle" font-size="15" font-weight="700" fill="currentColor">손님 요청</text>
+  <text x="75" y="204" text-anchor="middle" font-size="12" fill="currentColor">채팅·에이전트</text>
+  <path d="M132 185 L180 185" stroke="currentColor" stroke-width="2" marker-end="url(#ar2)"/>
+  <rect x="185" y="110" width="190" height="150" rx="14" fill="#e2632b" fill-opacity=".10" stroke="#e2632b" stroke-width="2"/>
+  <text x="280" y="140" text-anchor="middle" font-size="17" font-weight="700" fill="#e2632b">llm-d 배차 본부</text>
+  <text x="280" y="164" text-anchor="middle" font-size="12" fill="currentColor">추론 게이트웨이 + 스케줄러</text>
+  <text x="280" y="190" text-anchor="middle" font-size="12" fill="currentColor">"재료 있는 곳" 점수</text>
+  <text x="280" y="210" text-anchor="middle" font-size="12" fill="currentColor">"줄 길이" 점수</text>
+  <text x="280" y="230" text-anchor="middle" font-size="12" fill="currentColor">우선순위·공정성</text>
+  <image href="assets/veloki-a.webp" x="188" y="58" width="54" height="54"/>
+  <path d="M377 150 L455 75" stroke="currentColor" stroke-width="2" marker-end="url(#ar2)"/>
+  <path d="M377 185 L455 185" stroke="currentColor" stroke-width="2" marker-end="url(#ar2)"/>
+  <path d="M377 220 L455 300" stroke="currentColor" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ar2)"/>
+  <rect x="460" y="30" width="135" height="90" rx="12" fill="#2f6fd6" fill-opacity=".08" stroke="#2f6fd6" stroke-width="2"/>
+  <text x="527" y="62" text-anchor="middle" font-size="14" font-weight="700" fill="#2f6fd6">vLLM 주방 A</text>
+  <text x="527" y="86" text-anchor="middle" font-size="12" fill="currentColor">이 손님 재료 있음 ✓</text>
+  <rect x="460" y="140" width="135" height="90" rx="12" fill="#2f6fd6" fill-opacity=".08" stroke="#2f6fd6" stroke-width="2"/>
+  <text x="527" y="172" text-anchor="middle" font-size="14" font-weight="700" fill="#2f6fd6">vLLM 주방 B</text>
+  <text x="527" y="196" text-anchor="middle" font-size="12" fill="currentColor">재료 없음</text>
+  <rect x="460" y="255" width="135" height="100" rx="12" fill="#1f9e7a" fill-opacity=".10" stroke="#1f9e7a" stroke-width="2"/>
+  <text x="527" y="285" text-anchor="middle" font-size="14" font-weight="700" fill="#1f9e7a">프리필 전담</text>
+  <text x="527" y="307" text-anchor="middle" font-size="12" fill="currentColor">손질만 하는 주방</text>
+  <path d="M597 305 L640 305" stroke="#1f9e7a" stroke-width="3" marker-end="url(#ar2)"/>
+  <text x="618" y="292" text-anchor="middle" font-size="11" fill="currentColor">재료 전달</text>
+  <rect x="645" y="255" width="100" height="100" rx="12" fill="#1f9e7a" fill-opacity=".10" stroke="#1f9e7a" stroke-width="2"/>
+  <text x="695" y="285" text-anchor="middle" font-size="14" font-weight="700" fill="#1f9e7a">디코드</text>
+  <text x="695" y="307" text-anchor="middle" font-size="12" fill="currentColor">담기 전담</text>
+  <text x="695" y="327" text-anchor="middle" font-size="11" fill="currentColor">(NIXL 기본)</text>
+</svg>
+<figcaption>그림 2. llm-d는 엔진 앞에서 "어느 주방으로 보낼지"를 정합니다. 점선은 프리필/디코드 분리 구성을 쓸 때의 경로입니다.</figcaption>
+</figure>
+
+<figure class="illustration">
+  <img src="assets/261104-veloki-routing.webp" alt="벨로키가 재료가 준비된 주방과 빈 주방을 비교하며 배차한다" loading="lazy">
+  <figcaption>벨로키 본부장: 재료가 준비된 주방을 살펴보되, 실제 배차에서는 대기 상황도 함께 고려합니다.</figcaption>
+</figure>
+
+<h3>KV 캐시 인식 라우팅 → 재료 손질된 지점으로 보내기</h3>
+<p>본부는 각 주방에 어떤 앞부분(프리픽스)이 손질돼 있는지 점수로 보고, 그 지점으로 요청을 보냅니다. 단, 그 지점 줄이 너무 길면 다른 곳으로 돌립니다. v1.0 문서 표현으로는 "포화될 때까지는 붙어 있기"에 가깝습니다. 여러 턴짜리 대화나 에이전트 세션을 같은 주방에 붙여 두는 세션 인식 라우팅도 v1.0에 들어갔습니다.</p>
+
+<h3>프리필/디코드 분리 → 손질 주방과 담기 주방을 나누기</h3>
+<p>1장에서 본 것처럼 프리필은 연산이, 디코드는 메모리 읽기가 바쁩니다. 한 주방에서 둘을 같이 하면 긴 주문서 손질이 들어올 때마다 담고 있던 손님들이 잠깐씩 멈춥니다. llm-d는 손질 전담과 담기 전담 vLLM을 따로 두고, 손질된 재료(KV 캐시)를 NIXL이라는 전송 방식으로 넘깁니다. v1.0의 DisaggregatedSet은 이 두 주방을 한 묶음으로 관리해 업그레이드도 같이 맞춰서 합니다.</p>
+
+<h3>그 밖의 본부 업무</h3>
+<ul>
+  <li><b>KV 캐시 오프로딩</b>: 작업대가 꽉 차면 재료를 냉장고(CPU 메모리·스토리지)로 옮겨 두고 나중에 다시 꺼내 씁니다.</li>
+  <li><b>와이드 전문가 병렬</b>: 전문가 혼합(MoE) 모델의 "전문 요리사"들을 여러 GPU에 넓게 나눠 앉힙니다.</li>
+  <li><b>흐름 제어(QoS)</b>: 우선순위와 공정성 기준으로 줄을 세우고, 넘치면 일부 요청을 정중히 돌려보냅니다. 기본값은 먼저 온 순서입니다.</li>
+  <li><b>라우터 이중화</b>: 배차 본부에 대기 인원을 두어 본부가 쓰러져도 바로 넘겨받습니다.</li>
+</ul>
+
+<div class="bubble flip">
+  <img src="assets/veloki-a.webp" alt="벨로키">
+  <div class="say"><span class="who">벨로키</span>그러니까 llm-d가 vLLM을 대체하는 게 아니야. 주방장은 그대로 vLLM이고, llm-d는 주문과 주방 상황을 살펴 어느 지점으로 보낼지 정하는 본부야.</div>
+</div>
+
+<h2 id="sim">5. 배차 비교 데모: 같은 손님, 다른 배차</h2>
+<p>아래는 개념을 보기 위한 <b>가상 데모</b>입니다. 실제 llm-d 알고리즘이나 성능 수치를 재현하지 않습니다. 손님 여섯 명이 차례로 오는데, 그중 몇 명은 같은 문서(밑국물 🍲)나 같은 대화(🧾 2턴째)로 시작합니다.</p>
+<div class="sim" id="simbox">
+  <div class="btns" role="group" aria-label="배차 방식 선택">
+    <button type="button" data-mode="rr" aria-pressed="true">돌아가며 배차 (일반 로드밸런서)</button>
+    <button type="button" data-mode="kv" aria-pressed="false">재료 보고 배차 (KV 캐시 인식)</button>
+  </div>
+  <div class="kitchens" id="kitchens"></div>
+  <div class="score" id="score"></div>
+  <p class="note">초록 = 이미 손질된 재료를 재사용(캐시 적중), 빨강 = 처음부터 다시 손질. 줄이 3명을 넘으면 재료가 있어도 다른 주방으로 보내도록 했습니다.</p>
+</div>
+
+<h2 id="s6">6. 그래서 나는 뭘 쓰면 되나</h2>
+<p>아래 표는 공식 문서의 기능 설명을 바탕으로 한 <b>제 판단</b>입니다. 두 프로젝트 모두 "이럴 땐 필요 없다"는 기준을 공식적으로 내놓지 않았기 때문에, 조건이 애매하면 작은 구성으로 먼저 재 보시길 권합니다.</p>
+<div class="tbl">
+<table>
+<thead><tr><th>내 상황</th><th>추천</th><th>이유</th></tr></thead>
+<tbody>
+<tr><td>노트북·워크스테이션에서 모델 써 보기, GPU 1~2장</td><td><span class="tag t-v">vLLM만</span></td><td>배차할 주방이 하나뿐입니다. 쿠버네티스 운영 부담만 늘어납니다.</td></tr>
+<tr><td>사내 챗봇, vLLM 몇 대, 요청이 짧고 서로 안 겹침</td><td><span class="tag t-v">vLLM + 일반 LB</span></td><td>재사용할 밑국물이 적으면 캐시 인식 라우팅의 이득도 작습니다.</td></tr>
+<tr><td>같은 시스템 프롬프트·문서로 시작하는 요청이 많고 서버 여러 대</td><td><span class="tag t-d">llm-d 검토</span></td><td>캐시 재사용 기회가 있어 효과를 측정해 볼 만합니다.</td></tr>
+<tr><td>AI 에이전트·코딩 도구처럼 대화가 길고 여러 턴</td><td><span class="tag t-d">llm-d 우선 검토</span></td><td>세션을 같은 주방에 붙이는 라우팅과 오프로딩이 직접 해당됩니다.</td></tr>
+<tr><td>긴 입력과 긴 출력이 섞이고, 응답 지연 목표(SLO)가 빡빡함</td><td><span class="tag t-o">프리필/디코드 분리 실험</span></td><td>워크로드에 따라 효과가 달라지고 구성 난도가 높습니다. Red Hat 제품 문서 3.4는 이 기능을 개발자 프리뷰로 표시합니다.</td></tr>
+</tbody>
+</table>
+</div>
+<div class="card">
+<b>도입 전 체크리스트</b>
+<ul class="check">
+  <li>요청 앞부분이 얼마나 겹치는지(같은 시스템 프롬프트·문서·대화 이어가기) 로그로 먼저 셉니다.</li>
+  <li>지금 병목이 GPU 대수인지, 캐시 재계산인지, 긴 프리필 때문인지 구분합니다.</li>
+  <li>쿠버네티스와 Gateway API를 이미 운영하는지 확인합니다. 없다면 그 학습 비용이 첫 장벽입니다.</li>
+  <li>도입 효과는 첫 토큰까지 시간(TTFT)과 초당 토큰 수를 같은 부하로 전후 비교해 판단합니다.</li>
+</ul>
+</div>
+
+<h2 id="s7">7. 숫자는 어디까지 믿나</h2>
+<p>llm-d v1.0 발표 글에는 인상적인 숫자가 많지만, 대부분 <b>도입 기업이나 협력사가 자기 환경에서 잰 값</b>이고 비교 기준이 글에 자세히 적혀 있지 않습니다. 내 서비스에서 같은 배수가 나온다는 뜻으로 읽으면 안 됩니다.</p>
+<div class="tbl">
+<table>
+<thead><tr><th>누가 말했나</th><th>숫자</th><th>비교 기준</th></tr></thead>
+<tbody>
+<tr><td>Google Cloud (Vertex AI 운영)</td><td>TTFT 35% 넘게 감소, 프리픽스 캐시 적중률 35%→70%</td><td>글에 명시 없음</td></tr>
+<tr><td>AWS (SageMaker HyperPod)</td><td>초당 토큰 최대 70% 증가</td><td>"표준 vLLM" 대비</td></tr>
+<tr><td>Google TPU 에이전트 코딩 워크로드</td><td>중앙값 TTFT 85% 넘게 감소, 처리량 2.4배</td><td>일반 쿠버네티스 Service 대비</td></tr>
+<tr><td>IBM Research</td><td>H100 544장으로 코딩 에이전트 최대 3,000개 동시, 캐시 적중 약 98%</td><td>비용 비교 대상은 "독점 스택"으로만 표기</td></tr>
+</tbody>
+</table>
+</div>
+<p>공통점은 하나입니다. 숫자가 큰 사례는 모두 <b>앞부분이 많이 겹치는 워크로드</b>(에이전트, 긴 대화, 같은 문서)였습니다. 그래서 6장의 첫 체크 항목이 "겹침부터 세기"입니다.</p>
+
+<div class="bubble">
+  <img src="assets/veloki-a.webp" alt="벨로키">
+  <div class="say"><span class="who">벨로키</span>제 생각은 이래. 앞으로 AI 비용은 모델 단가보다 "같은 걸 몇 번 다시 계산하느냐"에서 더 갈릴 것 같아. 클라우드 아키텍트라면 GPU를 더 사기 전에 요청 로그에서 겹침부터 세 보는 게 순서야.</div>
+</div>
+
+<h2>출처</h2>
+<ul class="src">
+  <li><a href="https://llm-d.ai/blog/llm-d-v1.0-state-of-the-art-inference-ready-for-day-2">llm-d v1.0: State-of-the-art inference, ready for Day 2</a> (llm-d maintainers, 2026-10-20)</li>
+  <li><a href="https://llm-d.ai/blog/llm-d-announce">Announcing the llm-d community!</a> (Red Hat·Google·IBM 엔지니어, 2025-05-20)</li>
+  <li><a href="https://github.com/llm-d/llm-d/tree/main/guides/pd-disaggregation">llm-d P/D disaggregation guide</a> (GitHub)</li>
+  <li><a href="https://docs.redhat.com/es/documentation/red_hat_ai_inference/3.4/html/distributed_inference_with_llm-d/llmd-features-of-llmd_distributed-inference-with-llmd">Red Hat AI Inference 3.4 — llm-d 기능 문서</a></li>
+  <li><a href="https://docs.vllm.ai/en/v0.8.1/design/automatic_prefix_caching.html">vLLM — Automatic Prefix Caching 설계 문서</a></li>
+  <li><a href="https://pypi.org/project/vllm/">vLLM PyPI</a> (0.33.0, 2026-11-02 업로드 확인) · <a href="https://github.com/vllm-project/vllm">vLLM GitHub</a></li>
+</ul>
+
+<footer>
+  이 페이지는 AI가 공개 문서를 바탕으로 작성·수정한 초안이며, 발행 전 작성자 검수가 필요합니다. vLLM·llm-d 프로젝트와 이해관계는 없습니다. 비유는 이해를 돕기 위한 것이며 실제 구현의 모든 세부를 담지 않습니다. 5장 데모는 가상이며 성능을 재현하지 않습니다.<br>
+  안내자 벨로키는 TECHTAEK 공식 캐릭터이며, 장면 삽화는 AI 이미지 도구로 만들었습니다. 글·삽화 CC BY-NC-ND 4.0, 인용한 외부 자료의 권리는 각 권리자에게 있습니다.
+</footer>
+</div>
+
+<script>
+(function(){
+  var guests=[
+    {n:"손님1",p:"🍲 사내문서"},
+    {n:"손님2",p:"🧾 대화X 1턴"},
+    {n:"손님3",p:"🍲 사내문서"},
+    {n:"손님4",p:"🧾 대화X 2턴"},
+    {n:"손님5",p:"🥗 새 질문"},
+    {n:"손님6",p:"🍲 사내문서"}
+  ];
+  var keyOf=function(p){return p.indexOf("대화X")>=0?"대화X":p.replace(/^\S+\s/,"");};
+  var box=document.getElementById("kitchens"),score=document.getElementById("score");
+  function run(mode){
+    var ks=[0,1,2].map(function(i){return {name:"vLLM 주방 "+"ABC"[i],cache:{},q:[]};});
+    var hits=0,miss=0;
+    guests.forEach(function(g,i){
+      var key=keyOf(g.p),k;
+      if(mode==="rr"){k=ks[i%3];}
+      else{
+        var cand=ks.filter(function(x){return x.cache[key]&&x.q.length<3;});
+        k=cand.length?cand[0]:ks.slice().sort(function(a,b){return a.q.length-b.q.length;})[0];
+      }
+      var hit=!!k.cache[key];
+      hit?hits++:miss++;
+      k.cache[key]=true;
+      k.q.push({g:g,hit:hit});
+    });
+    box.innerHTML=ks.map(function(k){
+      return '<div class="k"><b>'+k.name+'</b><div class="prep">손질된 재료: '+(Object.keys(k.cache).join(", ")||"없음")+'</div>'+
+        k.q.map(function(x){return '<span class="chip '+(x.hit?"hit":"miss")+'">'+x.g.n+' '+x.g.p+'</span>';}).join("")+'</div>';
+    }).join("");
+    score.textContent="재사용 "+hits+"번 · 처음부터 손질 "+miss+"번";
+  }
+  var btns=document.querySelectorAll("#simbox button");
+  btns.forEach(function(b){b.addEventListener("click",function(){
+    btns.forEach(function(x){x.setAttribute("aria-pressed",x===b?"true":"false");});
+    run(b.getAttribute("data-mode"));
+  });});
+  run("rr");
+})();
+</script>
+</body>
+</html>
